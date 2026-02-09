@@ -2,50 +2,59 @@
 
 **The Intelligent Multiplexer for MCP Servers.**
 
-MCPlexor solves the "context window waste" problem by dynamically exposing tools to your AI agent only when they are needed. It acts as a smart proxy that sits between your agent (Claude, Cursor, Windsurf) and your heavy MCP servers (Linear, GitHub, Postgres, etc.).
+MCPlexor solves the "context window waste" problem by dynamically exposing tools to your AI agent only when they are needed. It acts as a smart proxy that sits between your agent (Claude, Cursor, Augment Code) and your MCP servers (Linear, Notion, Playwright, etc.).
 
-## 🚀 The Problem: Token Waste
+> **☁️ MCPlexor Cloud** – Don't want to run your own inference? Join the [waitlist](https://mcplexor.com) for our hosted routing service. We run optimized small models so you get the savings without the infra.
 
-Modern AI agents are powerful, but they have a critical limitation: **Context Window**.
+## 🚀 The Problem: 40k Tokens of Bloat
 
-- Heavy MCP servers like **Linear** or **PostHog** can consume **10,000+ tokens** individually just to list their tool definitions.
-- Connecting multiple such servers (e.g., GitHub + Linear + Postgres + Slack) can easily fill up 30,000-50,000 tokens of context before you even ask a question.
-- This leads to:
-  - 💸 **Higher API Costs**: Paying for thousands of unnecessary tokens on every request.
-  - 🐢 **Slower Responses**: Agents process massive prompts unnecessarily.
-  - 😵 **Confused Agents**: Too many tools overwhelm the agent, causing hallucinations or incorrect tool usage.
+If you're building agents with several MCP servers, you're dumping **~40k tokens** of tool definitions into your context on every request.
 
-### 📉 Scenario: The 20k Token Tax
+Here's what we measured:
 
-Imagine you want your agent to "Check my Linear issues and update the relevant code in GitHub."
+| MCP Server | Tools | Tokens |
+|------------|-------|--------|
+| Notion | 22 | ~26k |
+| Linear | 33 | ~8k |
+| Playwright | 22 | ~5k |
 
-| **Without MCPlexor** | **With MCPlexor** |
-| :--- | :--- |
-| Agent loads **ALL** Linear tools (~10k tokens) | Agent loads **ONLY** MCPlexor index (~100 tokens) |
-| Agent loads **ALL** GitHub tools (~10k tokens) | MCPlexor dynamically routes to Linear/GitHub |
-| **Total Overhead: ~20,000 tokens** | **Total Overhead: ~200 tokens** |
-| 💸 **Cost**: High | 💰 **Cost**: Negligible |
+That's **20% of a 200k context window** gone before your agent even processes the first message. And in practice, most runs only touch 1-2 tools – the rest is dead weight.
+
+**The consequences:**
+- 💸 **Higher API Costs**: Paying for tokens that do nothing
+- 🐢 **Slower Responses**: More tokens = more latency
+- � **Less Reasoning Room**: Context filled with unused tool definitions
+- 🤯 **More Compaction**: Frequent context summarization triggered early
+
+Anthropic wrote about this exact problem in their [Advanced Tool Use post](https://www.anthropic.com/engineering/advanced-tool-use). MCPlexor gives you the same experience for your own agents.
 
 ## 💡 The Solution: Semantic Discovery
 
-MCPlexor acts as a single, lightweight MCP server that proxies to others. Instead of dumping 500+ tool definitions into your agent's context:
+MCPlexor acts as a single, lightweight MCP server that proxies to others. Instead of preloading every tool definition:
 
 1. **Lightweight Index**: MCPlexor exposes a minimal set of capabilities based on your server descriptions.
-2. **Semantic Routing**: When the agent needs a tool (e.g., "check recent issues"), MCPlexor uses a lightweight routing model to identify the correct server.
-3. **Dynamic Loading**: It then exposes only the relevant tools for that specific task.
+2. **Semantic Routing**: When the agent needs a tool (e.g., "create a Linear issue"), MCPlexor uses an LLM to identify the correct server.
+3. **Dynamic Loading**: Only the relevant server's tools get exposed to the agent.
 
-**Result**: Massive token savings (often 90% reduction in system prompt size) and focused agent performance.
+**Result**: ~500 tokens overhead instead of ~40k. That's a **95%+ reduction**.
+
+## 🎯 When to Use What
+
+| Use Case | Recommendation |
+|----------|----------------|
+| **Power users / high volume** | Use **MCPlexor Cloud** ([waitlist](https://mcplexor.com)) – we run routing on optimized models, you get savings without running infra |
+| **Trying it out / privacy-first** | Use **Ollama** backend – runs 100% locally, zero cost, works offline |
+| **Claude Code / Augment Code** | MCPlexor exposes an "advanced search" tool that agents can call to discover capabilities dynamically |
 
 ## ✨ Key Features
 
 - **Protocol Multiplexing**: Run multiple MCP servers (stdio or http) under one connection.
-- **BYOK with Ollama**: Full support for local LLMs (Ollama) for the routing logic. Keep your data private and avoid external API calls.
-- **TUI & CLI**: Interactive Terminal UI for easy server management.
+- **BYOK with Ollama**: Full support for local LLMs for the routing logic. Keep your data private.
+- **Secure Credentials**: API keys stored in OS keychain (macOS Keychain / Windows Credential Manager / Linux keyring). Never in plaintext.
+- **TUI & CLI**: Interactive Terminal UI for easy server management, or script with CLI.
 - **Cross-Platform**: Works on macOS, Linux, and Windows.
 
 ## 📦 Installation
-
-To install the latest version:
 
 ```bash
 curl -fsSL https://mcplexor.com/install.sh | bash
@@ -66,14 +75,14 @@ mcplexor
 Or use the CLI to add servers directly:
 
 ```bash
-# Add GitHub MCP Server
-mcplexor mcp add github -d "GitHub API for managing repositories, issues, pull requests, and code search" -- npx -y @modelcontextprotocol/server-github
-
 # Add Linear MCP Server
-mcplexor mcp add linear -d "Linear for issue tracking and project management" -- npx -y @modelcontextprotocol/server-linear
+mcplexor mcp add linear -d "Linear for issue tracking and project management" -t http https://mcp.linear.app/mcp
 
-# Add Postgres MCP Server
-mcplexor mcp add postgres -d "PostgreSQL database for SQL queries" -- npx -y @modelcontextprotocol/server-postgres postgresql://localhost/mydb
+# Add Notion MCP Server  
+mcplexor mcp add notion -d "Notion for docs and knowledge base" -- npx -y @notionhq/mcp-server
+
+# Add Playwright MCP Server
+mcplexor mcp add playwright -d "Browser automation and testing" -- npx -y @anthropic/mcp-playwright
 ```
 
 ### 2. Start MCPlexor
@@ -107,13 +116,15 @@ Go to **Settings > General > MCP Servers** and add a new server:
 - **Type**: `command` (stdio)
 - **Command**: `mcplexor serve`
 
-## 🧠 Configuration: BYOK with Ollama
+## 🧠 Local Setup with Ollama
 
-MCPlexor supports "Bring Your Own Key" (BYOK) paradigm, allowing you to use your own local LLM for the intelligent routing logic. This means zero cost for discovery and full privacy.
+MCPlexor supports "Bring Your Own Key" (BYOK), allowing you to use your own local LLM for routing. Zero cost, full privacy, works offline.
 
 1. Ensure [Ollama](https://ollama.com/) is installed and running.
-2. Pull a suitable model (e.g., `llama3` or `mistral`).
-3. Configure MCPlexor to use Ollama by editing `~/.mcplexor/config.json`:
+2. Pull a model (e.g., `llama3`, `qwen3`, or `mistral`).
+3. In the TUI, press `/` then `model` and select `ollama`.
+
+Or configure via `~/.mcplexor/config.json`:
 
 ```json
 {
@@ -132,14 +143,11 @@ MCPlexor supports "Bring Your Own Key" (BYOK) paradigm, allowing you to use your
 }
 ```
 
-Now MCPlexor will use your local Ollama instance to "think" about which tool to serve, keeping your data strictly local.
-
 ## 🤖 Agent Rules (Recommended)
 
-To get the best performance, add these instructions to your Agent's system prompt or custom instructions (e.g., `.cursorrules` or `.windsurfrules`):
+To get the best performance, add these instructions to your Agent's system prompt (e.g., `.cursorrules` or `.windsurfrules`):
 
 ```text
 Always prefer to use the 'mcplexor' tool to discover available capabilities before attempting to use native tools or giving up.
 If you are unsure how to proceed, use the search/find capability to discover relevant tools.
-If the agent is stuck or hallucinating tools, explicitly type "use mcplexor" at the end of your message to force a fresh tool search.
 ```
